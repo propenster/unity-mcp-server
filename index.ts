@@ -154,35 +154,6 @@ const UNITY_CREATE_OBJECT_TOOL: Tool = {
     },
 };
 
-
-const LOCAL_SEARCH_TOOL: Tool = {
-    name: "brave_local_search",
-    description:
-        "Searches for local businesses and places using Brave's Local Search API. " +
-        "Best for queries related to physical locations, businesses, restaurants, services, etc. " +
-        "Returns detailed information including:\n" +
-        "- Business names and addresses\n" +
-        "- Ratings and review counts\n" +
-        "- Phone numbers and opening hours\n" +
-        "Use this when the query implies 'near me' or mentions specific locations. " +
-        "Automatically falls back to web search if no local results are found.",
-    inputSchema: {
-        type: "object",
-        properties: {
-            query: {
-                type: "string",
-                description: "Local search query (e.g. 'pizza near Central Park')"
-            },
-            count: {
-                type: "number",
-                description: "Number of results (1-20, default 5)",
-                default: 5
-            },
-        },
-        required: ["query"]
-    }
-};
-
 // Server implementation
 const server = new Server(
     {
@@ -221,45 +192,23 @@ function generateRealTimeSceneDesignScriptSourceCode(query: string): string {
     `
 }
 
-function realTimeSceneDesignScriptSourceCodeToUnityEditorScript(claudeModifiedditorScriptSourceCode: string, unity_project_path: string) {
-    // console.log("Writing modified script to Unity Editor Script");
-    const scriptPath = path.join(unity_project_path, "Assets", "Scripts", "SceneCreator.cs");
-    const fs = require("node:fs");
-    fs.writeFileSync(scriptPath, claudeModifiedditorScriptSourceCode);
-}
 function createUnityEditorScript(scriptPath: string, scriptContent: string) {
-    const scriptDirectory = path.dirname(scriptPath);
-    // Ensure the directory exists
-    if (!fs.existsSync(scriptDirectory)) {
-        fs.mkdirSync(scriptDirectory, { recursive: true });
+    try {
+        const scriptDirectory = path.dirname(scriptPath);
+        if (!fs.existsSync(scriptDirectory)) {
+            fs.mkdirSync(scriptDirectory, { recursive: true });
+        }
+        scriptContent = scriptContent.replace(/\\"/g, '"');
+        fs.writeFileSync(scriptPath, scriptContent, "utf8");
+        return true;
+    } catch (error) {
+        return false;
     }
-    scriptContent = scriptContent.replace(/\\"/g, '"');
-    // Write the file
-    fs.writeFileSync(scriptPath, scriptContent, "utf8");
 }
 async function unityDesign(query: string, unity_project_path: string) {
-    // console.log("Generating real time scene design script source code");
     const realTimeSceneDesignScriptSourceCode = generateRealTimeSceneDesignScriptSourceCode(query);
-    // const claudeModifiedditorScriptSourceCode = await claude.modify(realTimeSceneDesignScriptSourceCode);
-    // realTimeSceneDesignScriptSourceCodeToUnityEditorScript(claudeModifiedditorScriptSourceCode, unity_project_path);
-    // executeUnityEditorScript(scriptPath, unity_project_path);
     return realTimeSceneDesignScriptSourceCode;
 }
-// async function executeUnityEditorScript(scriptPath: string, unity_project_path: string) {
-//     const child_process = require("node:child_process");
-//     const process = child_process.spawn("unity", ["-batchmode", "-nographics", "-executeMethod", "SceneCreator.ShowWindow"]);
-//     process.stdout.on("data", (data: string) => {
-//         console.log(data);
-//     });
-
-//     process.stderr.on("data", (data: string) => {
-//         console.error(data);
-//     });
-//     process.on("close", (code: number) => {
-//         console.log("Unity Editor script executed with code " + code);
-//     });
-// }
-
 function isUnitySceneDesignerArgs(args: unknown): args is { query: string; unity_project_path: string } {
     return (
         typeof args === "object" &&
@@ -300,7 +249,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 }
                 const { query, unity_project_path } = args;
                 const results = await unityDesign(args.query, args.unity_project_path);
-                // console.log(Unity Scene Designer results: ${results});
                 return {
                     content: [{ type: "text", text: results }],
                     isError: false,
@@ -311,10 +259,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     throw new Error("Invalid arguments for send_modified_script_back_to_server");
                 }
                 const { modified_script, unity_project_path } = args;
-                // console.log(modified_script);
+                //if unity changes this tomorrow, we're basically toast...
+                //TODO: Make this more robust and less dependent on the file name and path
                 const scriptPath = path.join(unity_project_path, "Assets", "Scripts", "SceneCreator.cs");
-                // console.log(Writing modified script to Unity Editor Script ${scriptPath});
-                createUnityEditorScript(scriptPath, modified_script);
+                const success = createUnityEditorScript(scriptPath, modified_script);
+                if (!success) {
+                    throw new Error("Failed to create Unity Editor Script");
+                }
                 return {
                     content: [{ type: "text", text: modified_script }],
                     isError: false,
